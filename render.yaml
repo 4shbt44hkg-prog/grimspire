@@ -1,0 +1,10 @@
+# Render blueprint — creates the Grimspire web service (free tier).
+# One Node process serves the built client and hosts the co-op websocket.
+services:
+  - type: web
+    name: grimspire
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /

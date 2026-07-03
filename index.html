@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grimspire</title>
+  <link rel="stylesheet" href="/src/client/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="hud" class="hidden">
+    <div id="party"></div>
+    <div id="zonename"></div>
+    <div id="bossbar" class="hidden"><div id="bossfill"></div><span id="bossname"></span></div>
+    <canvas id="minimap" width="180" height="180"></canvas>
+    <div id="chatlog"></div>
+    <input id="chatinput" class="hidden" maxlength="200" placeholder="say something..." />
+    <div id="bottombar">
+      <div class="globe-wrap"><div class="globe" id="hpglobe"><div class="globe-fill" id="hpfill"></div><span class="globe-text" id="hptext"></span></div></div>
+      <div id="midbar">
+        <div id="beltrow"></div>
+        <div id="skillrow"></div>
+        <div id="xpbar"><div id="xpfill"></div></div>
+        <div id="panelbtns">
+          <button data-panel="char" title="Character (C)">C</button>
+          <button data-panel="inv" title="Inventory (I)">I</button>
+          <button data-panel="skills" title="Skills (S)">S</button>
+          <button data-panel="cube" title="Umbral Cube (B)">B</button>
+        </div>
+      </div>
+      <div class="globe-wrap"><div class="globe mana" id="mpglobe"><div class="globe-fill" id="mpfill"></div><span class="globe-text" id="mptext"></span></div></div>
+    </div>
+  </div>
+
+  <div id="panels">
+    <div id="panel-char" class="panel hidden"></div>
+    <div id="panel-inv" class="panel hidden"></div>
+    <div id="panel-skills" class="panel hidden"></div>
+    <div id="panel-cube" class="panel hidden"></div>
+    <div id="panel-stash" class="panel hidden"></div>
+    <div id="panel-wp" class="panel hidden"></div>
+    <div id="panel-vendor" class="panel hidden"></div>
+    <div id="panel-gamble" class="panel hidden"></div>
+  </div>
+
+  <div id="touchui" class="hidden"></div>
+  <div id="tooltip" class="hidden"></div>
+  <div id="held-item" class="hidden"></div>
+  <div id="toast"></div>
+
+  <div id="deathscreen" class="hidden">
+    <h1>You have died</h1>
+    <p id="deathmsg"></p>
+    <button id="respawnbtn">Rise Again in Town</button>
+  </div>
+
+  <div id="menu">
+    <h1 class="title">GRIMSPIRE</h1>
+    <p class="subtitle">an action rpg of loot, runes &amp; transmutation</p>
+    <div id="menu-inner">
+      <div class="menu-col">
+        <h2>Your Heroes</h2>
+        <div id="charlist"></div>
+        <div id="newchar">
+          <input id="charname" maxlength="16" placeholder="Hero name" />
+          <div id="classpick">
+            <div class="classcard" data-cls="warlord">
+              <canvas class="classportrait" data-cls="warlord" width="64" height="64"></canvas>
+              <b>Warlord</b><span>Melee juggernaut. Bash, Cleave, Seismic Slam.</span>
+            </div>
+            <div class="classcard" data-cls="pyromancer">
+              <canvas class="classportrait" data-cls="pyromancer" width="64" height="64"></canvas>
+              <b>Pyromancer</b><span>Elemental caster. Fireball, Frost Nova, Meteor.</span>
+            </div>
+          </div>
+          <button id="createchar">Create Hero</button>
+        </div>
+      </div>
+      <div class="menu-col">
+        <h2>Play</h2>
+        <div id="selectedchar">No hero selected</div>
+        <button id="newgame" disabled>New Game</button>
+        <div class="joinrow">
+          <input id="roomcode" maxlength="4" placeholder="CODE" />
+          <button id="joingame" disabled>Join Friend's Game</button>
+        </div>
+        <p class="hint">Start a New Game, then share the 4-letter code (top of screen) with friends so they can join you.</p>
+        <p id="menuerror"></p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/client/main.ts"></script>
+</body>
+</html>
