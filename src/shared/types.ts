@@ -141,6 +141,11 @@ export interface MonsterDef {
   spr: string;
   boss?: boolean;
   aggro: number;          // sight range
+  // ---- behavior depth ----
+  heal?: number;          // heals nearby allies this much per pulse (support enemy)
+  charge?: { windup: number; speed: number; dmgMult: number; cooldown: number }; // telegraphed rush
+  splitInto?: { def: string; count: number }; // spawns on death
+  chillOnHit?: number;    // slows the player's movement for this many seconds
 }
 
 export interface MonsterAffix {
@@ -158,6 +163,7 @@ export interface MonsterAffix {
 export const T_VOID = 0;
 export const T_FLOOR = 1;
 export const T_WALL = 2;
+export const T_WATER = 3;
 
 export interface MapObject {
   id: string;

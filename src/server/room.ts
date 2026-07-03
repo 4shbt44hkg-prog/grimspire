@@ -36,6 +36,13 @@ interface SMonster extends MonsterState {
   auraT: number;
   xp: number;
   mfBonus: number;
+  // behavior state
+  chargeState: "none" | "windup" | "dash";
+  chargeT: number;
+  chargeDX: number;
+  chargeDY: number;
+  chargeCd: number;
+  healT: number;
 }
 
 interface SProj extends ProjState {
@@ -47,6 +54,7 @@ interface SProj extends ProjState {
   eleKind: string;
   chains?: number;         // remaining chain-lightning jumps
   hitIds?: string[];       // monsters already struck by this chain
+  chill?: number;          // seconds of movement chill applied to players hit
 }
 
 interface SSentinel {
@@ -134,9 +142,14 @@ export class Room {
       } else if (isChamp) {
         affixes.push(pick(this.rng, Object.keys(MONSTER_AFFIXES)));
       }
+      // support casters (healers/chillers) lead packs of regular monsters
+      // instead of forming whole covens of themselves
+      const def = MONSTERS[defId];
+      const escortPool = pool.filter((p) => !MONSTERS[p].heal && !MONSTERS[p].chillOnHit);
+      const escortId = (def.heal || def.chillOnHit) && escortPool.length ? pick(this.rng, escortPool) : defId;
       for (let i = 0; i < count; i++) {
         const leader = i === 0;
-        this.spawnOne(sim, depth, defId,
+        this.spawnOne(sim, depth, leader ? defId : escortId,
           pack.x + (this.rng() - 0.5) * 3, pack.y + (this.rng() - 0.5) * 3,
           leader && isRare ? affixes : leader && isChamp ? affixes : [],
           leader && isRare, leader && isChamp, false);
@@ -171,6 +184,7 @@ export class Room {
       cd: 0, wanderT: 0, wx: x, wy: y, slowT: 0, dmgMult, speedMult, asMult, leech, aura, auraT: 0,
       xp: Math.round(def.xp * depthXpMult(depth) * (rare ? 5 : champ ? 2.5 : 1) * (boss ? 1 : 1)),
       mfBonus: rare ? 100 : champ ? 40 : boss ? 200 : 0,
+      chargeState: "none", chargeT: 0, chargeDX: 0, chargeDY: 0, chargeCd: 1, healT: 1,
     });
   }
 
@@ -341,7 +355,13 @@ export class Room {
   meleeHit(sim: DepthSim, p: SPlayer, tx: number, ty: number, range: number, arc: number, dmg: number, ele: string, targetId?: string) {
     const ang = Math.atan2(ty - p.y, tx - p.x);
     let hitAny = false;
-    for (const m of sim.monsters) {
+    // the clicked monster gets first claim on a single-target swing
+    let list = sim.monsters;
+    if (targetId) {
+      const t = sim.monsters.find((m) => m.id === targetId && m.hp > 0);
+      if (t) list = [t, ...sim.monsters.filter((m) => m !== t)];
+    }
+    for (const m of list) {
       if (m.hp <= 0) continue;
       const d = Math.hypot(m.x - p.x, m.y - p.y);
       if (d > range + MONSTERS[m.def].size) continue;
@@ -367,6 +387,17 @@ export class Room {
     if (m.hp <= 0) {
       m.hp = 0;
       this.ev(p.depth, { k: "die", id: m.id, xp: m.xp, x: m.x, y: m.y, boss: m.boss });
+      // splitters burst into spawn
+      const def = MONSTERS[m.def];
+      if (def.splitInto) {
+        for (let i = 0; i < def.splitInto.count; i++) {
+          this.spawnOne(sim, Math.max(1, m.lvl), def.splitInto.def,
+            m.x + (Math.random() - 0.5) * 1.2, m.y + (Math.random() - 0.5) * 1.2, [], false, false, false);
+          const sp = sim.monsters[sim.monsters.length - 1];
+          sp.aggroId = p.id;
+        }
+        this.ev(p.depth, { k: "fx", fx: "split", x: m.x, y: m.y });
+      }
       const r = mulberry32((Math.random() * 0xffffffff) >>> 0);
       const drops = m.boss ? 4 : m.rare ? ri(r, 2, 3) : m.champ ? ri(r, 1, 2) : 1;
       const dropChance = m.boss || m.rare || m.champ ? 1 : 0.62;
@@ -541,7 +572,7 @@ export class Room {
       } else if (!dead && !pr.friendly) {
         for (const p of players) {
           if (Math.hypot(p.x - pr.x, p.y - pr.y) < 0.45) {
-            this.hitPlayer(p, pr.dmg, pr.eleKind, depth);
+            this.hitPlayer(p, pr.dmg, pr.eleKind, depth, pr.chill);
             dead = true;
             break;
           }
@@ -568,6 +599,63 @@ export class Room {
 
       const speed = def.speed * m.speedMult * (1 - (m.slow ?? 0));
       const inAggro = bestD < def.aggro || m.aggroId != null;
+
+      // ---- telegraphed charge (Cinder Hound & co.) ----
+      if (def.charge) {
+        m.chargeCd -= TICK;
+        if (m.chargeState === "windup") {
+          m.chargeT -= TICK;
+          m.anim = "windup";
+          if (m.chargeT <= 0) {
+            m.chargeState = "dash";
+            m.chargeT = 1.0;
+          }
+          continue;
+        }
+        if (m.chargeState === "dash") {
+          m.chargeT -= TICK;
+          m.anim = "dash";
+          const step = def.charge.speed * m.speedMult * TICK;
+          const [nx, ny] = moveWithCollision(sim.map, m.x, m.y, m.chargeDX * step, m.chargeDY * step, def.size * 0.7);
+          const blocked = Math.abs(nx - m.x) < 0.001 && Math.abs(ny - m.y) < 0.001;
+          m.x = nx; m.y = ny;
+          let hit = false;
+          for (const p of players) {
+            if (Math.hypot(p.x - m.x, p.y - m.y) < def.size + 0.5) {
+              const dmg = (def.dmg[0] + Math.random() * (def.dmg[1] - def.dmg[0])) * m.dmgMult * def.charge.dmgMult;
+              this.hitPlayer(p, dmg, "phys", depth);
+              hit = true;
+            }
+          }
+          if (m.chargeT <= 0 || blocked || hit) m.chargeState = "none";
+          continue;
+        }
+        if (inAggro && bestD > 2 && bestD < 8 && m.chargeCd <= 0) {
+          m.chargeState = "windup";
+          m.chargeT = def.charge.windup;
+          m.chargeCd = def.charge.cooldown;
+          const len = bestD || 1;
+          m.chargeDX = (target.x - m.x) / len;
+          m.chargeDY = (target.y - m.y) / len;
+          m.dir = m.chargeDX < 0 ? -1 : 1;
+          m.anim = "windup";
+          continue;
+        }
+      }
+
+      // ---- pack healers (Bog Witch) ----
+      if (def.heal && inAggro) {
+        m.healT -= TICK;
+        if (m.healT <= 0) {
+          m.healT = 1.6;
+          for (const o of sim.monsters) {
+            if (o !== m && o.hp > 0 && o.hp < o.maxHp && Math.hypot(o.x - m.x, o.y - m.y) < 5) {
+              o.hp = Math.min(o.maxHp, o.hp + Math.round(def.heal * depthHpMult(depth) * 0.5));
+              this.ev(depth, { k: "fx", fx: "heal", id: o.id, x: o.x, y: o.y });
+            }
+          }
+        }
+      }
 
       if (inAggro && bestD > def.attackRange * 0.85) {
         const dx = (target.x - m.x) / bestD, dy = (target.y - m.y) / bestD;
@@ -606,7 +694,7 @@ export class Room {
           sim.projs.push({
             id: uid("pr"), x: m.x, y: m.y, vx: (dx / len) * def.proj.speed, vy: (dy / len) * def.proj.speed,
             element: def.proj.element, friendly: false, spr: def.proj.element === "fire" ? "firebolt" : "arrow",
-            dmg, ttl: 2.5, radius: 0, ownerId: m.id, eleKind: def.proj.element,
+            dmg, ttl: 2.5, radius: 0, ownerId: m.id, eleKind: def.proj.element, chill: def.chillOnHit,
           });
         } else {
           this.hitPlayer(target, dmg, "phys", depth);
@@ -646,7 +734,7 @@ export class Room {
     }
   }
 
-  hitPlayer(p: SPlayer, rawDmg: number, ele: string, depth: number) {
+  hitPlayer(p: SPlayer, rawDmg: number, ele: string, depth: number, chill?: number) {
     if (p.dead) return;
     let dmg = rawDmg;
     if (ele === "phys") {
@@ -657,7 +745,7 @@ export class Room {
       dmg *= 1 - Math.min(75, res) / 100;
     }
     dmg = Math.max(1, Math.round(dmg));
-    this.send(p.ws, { t: "ev", ev: [{ k: "phit", amt: dmg, ele }] });
+    this.send(p.ws, { t: "ev", ev: [{ k: "phit", amt: dmg, ele, chill }] });
   }
 
   // ---------------- net ----------------

@@ -285,6 +285,13 @@ mo({ id: "bat", name: "Duskwing", hp: 7, dmg: [1, 3], speed: 4.2, attackRange: 0
 mo({ id: "brute", name: "Gravehulk", hp: 70, dmg: [8, 15], speed: 1.4, attackRange: 1.4, attackRate: 0.6, xp: 40, size: 0.6, spr: "brute", aggro: 8 });
 mo({ id: "boss", name: "The Gravelord", hp: 420, dmg: [12, 22], speed: 2.0, attackRange: 1.6, attackRate: 0.9, xp: 400, size: 0.8, spr: "boss", boss: true, aggro: 14 });
 
+// ---- biome signature enemies (behavioral depth) ----
+mo({ id: "witch", name: "Bog Witch", hp: 20, dmg: [3, 6], speed: 2.0, attackRange: 6.5, attackRate: 0.55, proj: { speed: 7, element: "pois" }, xp: 26, size: 0.4, spr: "witch", aggro: 10, heal: 6 });
+mo({ id: "hound", name: "Cinder Hound", hp: 24, dmg: [5, 9], speed: 3.2, attackRange: 1.2, attackRate: 1.0, xp: 22, size: 0.45, spr: "hound", aggro: 11, charge: { windup: 0.7, speed: 9, dmgMult: 2.2, cooldown: 4 } });
+mo({ id: "rime", name: "Rime Caller", hp: 18, dmg: [4, 7], speed: 2.0, attackRange: 7, attackRate: 0.6, proj: { speed: 8, element: "cold" }, xp: 24, size: 0.4, spr: "rime", aggro: 10, chillOnHit: 2.2 });
+mo({ id: "fungal", name: "Fungal Horror", hp: 34, dmg: [4, 8], speed: 1.7, attackRange: 1.2, attackRate: 0.7, xp: 20, size: 0.5, spr: "fungal", aggro: 8, splitInto: { def: "spawnling", count: 2 } });
+mo({ id: "spawnling", name: "Fungal Spawnling", hp: 9, dmg: [2, 4], speed: 3.4, attackRange: 0.9, attackRate: 1.4, xp: 5, size: 0.28, spr: "spawnling", aggro: 12 });
+
 export const MONSTER_AFFIXES: Record<string, MonsterAffix> = {
   fanatic: { id: "fanatic", name: "Fanatic", speedMult: 1.5, asMult: 1.4 },
   stoneskin: { id: "stoneskin", name: "Stoneskin", hpMult: 2.2 },
@@ -294,12 +301,18 @@ export const MONSTER_AFFIXES: Record<string, MonsterAffix> = {
   mighty: { id: "mighty", name: "Mighty", dmgMult: 1.6, hpMult: 1.3 },
 };
 
-// Which monsters appear at a given depth.
+// Which monsters appear at a given depth — flavored by the zone's biome.
 export function monsterPool(depth: number): string[] {
+  const biome = (depth - 1) % 4;
   const pool = ["zombie", "skeleton"];
   if (depth >= 2) pool.push("bat", "archer");
   if (depth >= 3) pool.push("imp");
   if (depth >= 4) pool.push("brute");
+  // signature enemies join their home biome's pool
+  if (biome === 0) pool.push("witch", "bat");
+  else if (biome === 1) pool.push("hound", "hound", "imp");
+  else if (biome === 2 && depth >= 2) pool.push("rime");
+  else if (biome === 3 && depth >= 2) pool.push("fungal", "fungal");
   return pool;
 }
 

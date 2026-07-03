@@ -2,7 +2,7 @@
 // server and every client, so only the seed travels over the network.
 
 import { mulberry32, ri, chance, type RNG } from "./rng";
-import { T_FLOOR, T_VOID, T_WALL, type GameMap, type MapObject } from "./types";
+import { T_FLOOR, T_VOID, T_WALL, T_WATER, type GameMap, type MapObject } from "./types";
 
 // Outdoor zones: open terrain through rotating biomes. A winding protected
 // trail runs from the entry portal to the rift portal at the far end, with
@@ -54,6 +54,25 @@ export function generateMap(seed: number, depth: number): GameMap {
     }
   }
   trail.push(exit);
+
+  // water pools — path around them (the trail stays dry)
+  const nLakes = ri(r, 2, 4);
+  for (let l = 0; l < nLakes; l++) {
+    let px = ri(r, 8, w - 9), py = ri(r, 8, h - 9);
+    const size = ri(r, 10, 26);
+    for (let s = 0; s < size; s++) {
+      for (let dy = 0; dy <= 1; dy++)
+        for (let dx = 0; dx <= 1; dx++) {
+          const nx = px + dx, ny = py + dy;
+          if (!protectedT[idx(nx, ny)] && tiles[idx(nx, ny)] === T_FLOOR &&
+              Math.hypot(nx - entry.x, ny - entry.y) > 8 && Math.hypot(nx - exit.x, ny - exit.y) > 6) {
+            tiles[idx(nx, ny)] = T_WATER;
+          }
+        }
+      px = Math.max(6, Math.min(w - 7, px + ri(r, -1, 1)));
+      py = Math.max(6, Math.min(h - 7, py + ri(r, -1, 1)));
+    }
+  }
 
   // obstacle thickets
   const nPatches = ri(r, 30, 42);

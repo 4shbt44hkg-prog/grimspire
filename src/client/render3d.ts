@@ -5,7 +5,7 @@
 import * as THREE from "three";
 import { MONSTERS } from "../shared/gamedata";
 import { RARITY_COLOR } from "../shared/items";
-import { T_FLOOR, T_WALL, type GameMap } from "../shared/types";
+import { T_FLOOR, T_WALL, T_WATER, type GameMap } from "../shared/types";
 import { G, IS_TOUCH, type FX } from "./game";
 import { blobShadow, glowSprite, spawnModel } from "./models3d";
 
@@ -155,7 +155,7 @@ function buildDepth(map: GameMap, depth: number) {
   sun.color.set(theme.sun);
   sun.intensity = theme.sunInt;
 
-  // ---- terrain: ground under every non-void tile ----
+  // ---- terrain: ground under every non-void tile (with micro-relief) ----
   let nGround = 0;
   for (let i = 0; i < map.w * map.h; i++) if (map.tiles[i] !== 0) nGround++;
   const floorGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
@@ -165,26 +165,33 @@ function buildDepth(map: GameMap, depth: number) {
   const col = new THREE.Color();
   let fi = 0;
   const obstacleTiles: { x: number; y: number; v: number }[] = [];
+  const waterTiles: { x: number; y: number }[] = [];
+  const clutterTiles: { x: number; y: number; v: number }[] = [];
   for (let y = 0; y < map.h; y++)
     for (let x = 0; x < map.w; x++) {
       const t = map.tiles[y * map.w + x];
       if (t === 0) continue;
       const v = map.variant[y * map.w + x];
-      dummy.position.set(x + 0.5, 0, y + 0.5);
+      dummy.position.set(x + 0.5, t === T_FLOOR ? ((v % 5) - 2) * 0.009 : t === T_WATER ? -0.12 : 0, y + 0.5);
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
       floorMesh.setMatrixAt(fi, dummy.matrix);
-      col.set(theme.floor[v % 3]).multiplyScalar((t === T_WALL ? 0.78 : 0.92) + (v % 7) * 0.03);
+      col.set(theme.floor[v % 3]).multiplyScalar(t === T_WALL ? 0.78 + (v % 7) * 0.03 : t === T_WATER ? 0.4 : 0.92 + (v % 7) * 0.03);
       floorMesh.setColorAt(fi, col);
       fi++;
       if (t === T_WALL) obstacleTiles.push({ x, y, v });
+      else if (t === T_WATER) waterTiles.push({ x, y });
+      else clutterTiles.push({ x, y, v });
     }
   floorMesh.instanceMatrix.needsUpdate = true;
   if (floorMesh.instanceColor) floorMesh.instanceColor.needsUpdate = true;
   depthGroup.add(floorMesh);
 
+  buildWater(waterTiles, theme);
   buildObstacles(obstacleTiles, theme);
+  buildClutter(clutterTiles, theme);
+  buildParticles(theme);
 
   // objects
   for (const o of map.objects) {
@@ -211,8 +218,12 @@ function buildDepth(map: GameMap, depth: number) {
   const sc = 176 / Math.max(map.w, map.h);
   for (let y = 0; y < map.h; y++)
     for (let x = 0; x < map.w; x++) {
-      if (map.tiles[y * map.w + x] === T_FLOOR) {
+      const tl = map.tiles[y * map.w + x];
+      if (tl === T_FLOOR) {
         mg.fillStyle = "#4a4438";
+        mg.fillRect(2 + x * sc, 2 + y * sc, Math.ceil(sc), Math.ceil(sc));
+      } else if (tl === T_WATER) {
+        mg.fillStyle = map.theme === 1 ? "#8a4018" : "#2a4a6a";
         mg.fillRect(2 + x * sc, 2 + y * sc, Math.ceil(sc), Math.ceil(sc));
       }
     }
@@ -221,6 +232,151 @@ function buildDepth(map: GameMap, depth: number) {
     if (o.type === "stairs_up") { mg.fillStyle = "#7ad87a"; mg.fillRect(o.x * sc - 1, o.y * sc - 1, 4, 4); }
     if (o.type === "waypoint") { mg.fillStyle = "#5ac8d8"; mg.fillRect(o.x * sc - 1, o.y * sc - 1, 4, 4); }
   }
+}
+
+// ---------------- water, clutter & atmosphere ----------------
+let waterMesh: THREE.InstancedMesh | null = null;
+let waterIsLava = false;
+
+function buildWater(tiles: { x: number; y: number }[], theme: Biome) {
+  waterMesh = null;
+  if (!tiles.length) return;
+  waterIsLava = theme.kind === "wastes";
+  const matW = waterIsLava
+    ? new THREE.MeshLambertMaterial({ color: 0xff7a28, emissive: 0xa03008, emissiveIntensity: 1.0, transparent: true, opacity: 0.95 })
+    : theme.kind === "tundra"
+      ? new THREE.MeshLambertMaterial({ color: 0x9fd0e8, emissive: 0x1a3a50, emissiveIntensity: 0.4, transparent: true, opacity: 0.9 })
+      : new THREE.MeshLambertMaterial({ color: theme.kind === "moor" ? 0x24404a : 0x1a3038, emissive: 0x0a1820, emissiveIntensity: 0.5, transparent: true, opacity: 0.88 });
+  const gW = new THREE.PlaneGeometry(1.02, 1.02).rotateX(-Math.PI / 2);
+  waterMesh = new THREE.InstancedMesh(gW, matW, tiles.length);
+  const d = new THREE.Object3D();
+  tiles.forEach((t, i) => {
+    d.position.set(t.x + 0.5, -0.055, t.y + 0.5);
+    d.updateMatrix();
+    waterMesh!.setMatrixAt(i, d.matrix);
+  });
+  waterMesh.instanceMatrix.needsUpdate = true;
+  depthGroup!.add(waterMesh);
+}
+
+function buildClutter(tiles: { x: number; y: number; v: number }[], theme: Biome) {
+  const kind = theme.kind;
+  const d = new THREE.Object3D();
+  const col = new THREE.Color();
+  // grass / ferns / snow bumps
+  const grassy = tiles.filter((t) => t.v % 7 === 0);
+  if (grassy.length) {
+    let gGeo: THREE.BufferGeometry;
+    let gColor: string;
+    if (kind === "tundra") {
+      gGeo = new THREE.SphereGeometry(0.16, 6, 4);
+      gColor = "#8a97ab";
+    } else {
+      gGeo = new THREE.ConeGeometry(0.05, kind === "wood" ? 0.34 : 0.24, 4);
+      gColor = kind === "moor" ? "#4a6a34" : kind === "wastes" ? "#5c4030" : kind === "wood" ? "#2e4a26" : "#5c6a38";
+    }
+    const gm = new THREE.InstancedMesh(gGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), grassy.length * 3);
+    let gi = 0;
+    for (const t of grassy) {
+      for (let k = 0; k < 3; k++) {
+        d.position.set(
+          t.x + 0.2 + ((t.v * (k + 3)) % 13) / 20,
+          kind === "tundra" ? -0.06 : 0.1,
+          t.y + 0.2 + ((t.v * (k + 7)) % 11) / 18,
+        );
+        d.rotation.set(0, (t.v + k) * 1.3, (k - 1) * 0.12);
+        const s = 0.7 + ((t.v + k * 5) % 7) * 0.09;
+        d.scale.set(s, s, s);
+        d.updateMatrix();
+        gm.setMatrixAt(gi, d.matrix);
+        col.set(gColor).multiplyScalar(0.8 + ((t.v + k) % 5) * 0.08);
+        gm.setColorAt(gi, col);
+        gi++;
+      }
+    }
+    gm.instanceMatrix.needsUpdate = true;
+    depthGroup!.add(gm);
+  }
+  // pebbles
+  const pebbly = tiles.filter((t) => t.v % 23 === 3);
+  if (pebbly.length) {
+    const pm = new THREE.InstancedMesh(
+      new THREE.DodecahedronGeometry(0.07),
+      new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      pebbly.length,
+    );
+    pebbly.forEach((t, i) => {
+      d.position.set(t.x + 0.3 + (t.v % 9) / 20, 0.03, t.y + 0.3 + (t.v % 7) / 16);
+      d.rotation.set(0, t.v * 0.7, 0);
+      d.scale.setScalar(0.7 + (t.v % 5) * 0.15);
+      d.updateMatrix();
+      pm.setMatrixAt(i, d.matrix);
+      col.set(kind === "tundra" ? "#a8b8cc" : "#6d675c").multiplyScalar(0.8 + (t.v % 4) * 0.08);
+      pm.setColorAt(i, col);
+    });
+    pm.instanceMatrix.needsUpdate = true;
+    depthGroup!.add(pm);
+  }
+}
+
+// Ambient particles: snow / embers / motes drifting around the player.
+const P_COUNT = 170;
+let particles: THREE.Points | null = null;
+let pMode: "fall" | "rise" | "drift" = "drift";
+
+function buildParticles(theme: Biome) {
+  if (particles) {
+    scene.remove(particles);
+    particles = null;
+  }
+  const kind = theme.kind;
+  const cfg = {
+    moor: { color: 0xaac890, mode: "drift" as const, size: 2.4, opacity: 0.5 },
+    wastes: { color: 0xffa050, mode: "rise" as const, size: 2.6, opacity: 0.7 },
+    tundra: { color: 0xe8f2ff, mode: "fall" as const, size: 3.0, opacity: 0.8 },
+    wood: { color: 0xb9a0d8, mode: "drift" as const, size: 2.4, opacity: 0.5 },
+    town: { color: 0xffd890, mode: "drift" as const, size: 2.6, opacity: 0.55 },
+  }[kind];
+  pMode = cfg.mode;
+  const pos = new Float32Array(P_COUNT * 3);
+  for (let i = 0; i < P_COUNT; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * 44;
+    pos[i * 3 + 1] = Math.random() * 9;
+    pos[i * 3 + 2] = (Math.random() - 0.5) * 44;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  particles = new THREE.Points(g, new THREE.PointsMaterial({
+    color: cfg.color, size: cfg.size, sizeAttenuation: false,
+    transparent: true, opacity: cfg.opacity, blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  scene.add(particles);
+}
+
+function updateParticles(dt: number) {
+  if (!particles) return;
+  particles.position.set(G.x, 0, G.y);
+  const attr = particles.geometry.getAttribute("position") as THREE.BufferAttribute;
+  const arr = attr.array as Float32Array;
+  const t = G.now;
+  for (let i = 0; i < P_COUNT; i++) {
+    const ix = i * 3;
+    if (pMode === "fall") {
+      arr[ix + 1] -= dt * (1.4 + (i % 5) * 0.3);
+      arr[ix] += Math.sin(t * 0.8 + i) * dt * 0.5;
+      if (arr[ix + 1] < 0) arr[ix + 1] = 9;
+    } else if (pMode === "rise") {
+      arr[ix + 1] += dt * (0.8 + (i % 5) * 0.25);
+      arr[ix] += Math.sin(t * 1.2 + i) * dt * 0.4;
+      if (arr[ix + 1] > 9) arr[ix + 1] = 0;
+    } else {
+      arr[ix] += Math.sin(t * 0.5 + i * 2.1) * dt * 0.6;
+      arr[ix + 1] += Math.cos(t * 0.4 + i * 1.3) * dt * 0.3;
+      if (arr[ix + 1] < 0.2) arr[ix + 1] = 0.2;
+      if (arr[ix + 1] > 8) arr[ix + 1] = 8;
+    }
+  }
+  attr.needsUpdate = true;
 }
 
 // ---------------- outdoor obstacles (trees / rocks) with occluder fade ----------------
@@ -254,8 +410,25 @@ function buildObstacles(tiles: { x: number; y: number; v: number }[], theme: Bio
   treeInfo = [];
   const kind = theme.kind;
   const rockRatio = kind === "wastes" ? 0.7 : kind === "moor" ? 0.4 : kind === "tundra" ? 0.35 : 0.12;
+  const PROPS: Record<string, string[]> = {
+    moor: ["stone_mono", "log", "bonepile"],
+    wastes: ["obelisk", "bonepile", "obelisk"],
+    tundra: ["iceshard", "stone_mono", "iceshard"],
+    wood: ["log", "pillar_ruin", "log"],
+    town: ["pillar_ruin", "log", "stone_mono"],
+  };
   const trees: typeof tiles = [], rocks: typeof tiles = [];
-  for (const t of tiles) ((t.v % 100) / 100 < rockRatio ? rocks : trees).push(t);
+  for (const t of tiles) {
+    // a few obstacle tiles become ruins / standing stones / bones instead
+    if (t.v % 19 === 0) {
+      const prop = spawn(PROPS[kind][t.v % 3]);
+      prop.position.set(t.x + 0.5, 0, t.y + 0.5);
+      prop.rotation.y = (t.v % 12) * 0.5;
+      depthGroup!.add(prop);
+      continue;
+    }
+    ((t.v % 100) / 100 < rockRatio ? rocks : trees).push(t);
+  }
   const col = new THREE.Color();
 
   if (rocks.length) {
@@ -401,18 +574,68 @@ function faceRot(dir: number): number {
   return dir > 0 ? (Math.PI * 3) / 4 : -Math.PI / 4;
 }
 
-function animateBody(g: THREE.Group, walking: boolean, dead: boolean, castT: number, phase: number) {
-  const body = g.getObjectByName("body");
+// Drive the limb rig: real strides, arm swings, telegraphs and squash.
+function animateRig(g: THREE.Group, anim: string, dead: boolean, castT: number, phaseOff: number) {
+  const body = g.getObjectByName("body") as THREE.Group | null;
   if (!body) return;
-  const t = G.now;
-  body.position.y = walking ? Math.abs(Math.sin(t * 9 + phase)) * 0.06 : 0;
-  body.rotation.z = walking ? Math.sin(t * 9 + phase) * 0.06 : 0;
-  body.rotation.x = castT > 0 ? 0.3 : (body.userData.baseTilt ?? 0);
   if (dead) {
     g.rotation.z = Math.PI / 2;
     g.position.y = 0.1;
-  } else {
-    g.rotation.z = 0;
+    return;
+  }
+  g.rotation.z = 0;
+  const rig = (body.userData.rig as string) ?? "biped";
+  const t = G.now;
+  const moving = anim === "walk" || anim === "spin";
+  const ph = t * 10 + phaseOff;
+  const get = (n: string) => body.getObjectByName(n);
+
+  // windup shiver telegraph (any rig)
+  body.position.x = anim === "windup" ? Math.sin(t * 42) * 0.02 : 0;
+
+  if (rig === "biped" || rig === "arms") {
+    const swing = moving ? Math.sin(ph) * 0.72 : 0;
+    const legL = get("legL"), legR = get("legR"), armL = get("armL"), armR = get("armR");
+    if (legL) legL.rotation.x = swing;
+    if (legR) legR.rotation.x = -swing;
+    const attacking = anim === "attack" || castT > 0;
+    if (armL) armL.rotation.x = (armL.userData.baseX ?? 0) + (moving ? -swing * 0.8 : Math.sin(t * 1.7 + phaseOff) * 0.04);
+    if (armR) {
+      armR.rotation.x = attacking
+        ? -1.7 + Math.sin(t * 20) * 0.3
+        : (armR.userData.baseX ?? 0) + (moving ? swing * 0.8 : Math.sin(t * 1.7 + phaseOff + 2) * 0.04);
+    }
+    body.position.y = moving ? Math.abs(Math.sin(ph)) * 0.05 : 0;
+    body.rotation.x = (body.userData.baseTilt ?? 0) + (moving ? 0.13 : 0) + (castT > 0 ? 0.12 : 0);
+    body.rotation.z = moving ? Math.sin(ph) * 0.045 : 0;
+    const robe = get("robe");
+    if (robe) robe.rotation.z = moving ? Math.sin(ph) * 0.08 : Math.sin(t * 1.8 + phaseOff) * 0.025;
+  } else if (rig === "quad") {
+    const dashing = anim === "dash";
+    const qph = dashing ? t * 17 + phaseOff : ph;
+    const amp = dashing ? 1.05 : 0.8;
+    const sw = (moving || dashing) ? Math.sin(qph) * amp : 0;
+    const fl = get("qlegFL"), fr = get("qlegFR"), bl = get("qlegBL"), br = get("qlegBR");
+    if (fl) fl.rotation.x = sw;
+    if (br) br.rotation.x = sw;
+    if (fr) fr.rotation.x = -sw;
+    if (bl) bl.rotation.x = -sw;
+    if (anim === "windup") {
+      body.position.y = -0.08;
+      body.rotation.x = -0.18; // rearing back before the pounce
+    } else if (dashing) {
+      body.position.y = 0.04;
+      body.rotation.x = 0.22;  // full tilt
+    } else {
+      body.position.y = moving ? Math.abs(Math.sin(qph)) * 0.04 : 0;
+      body.rotation.x = 0;
+    }
+  } else if (rig === "blob") {
+    const pulse = 1 + Math.sin(t * 3.2 + phaseOff) * 0.05 + (moving ? Math.abs(Math.sin(ph * 0.8)) * 0.08 : 0);
+    body.scale.set(pulse, 2 - pulse, pulse);
+    body.position.y = moving ? Math.abs(Math.sin(ph * 0.8)) * 0.13 : 0;
+  } else if (rig === "float") {
+    body.position.y = 0.08 + Math.sin(t * 1.6 + phaseOff) * 0.06;
   }
 }
 
@@ -445,7 +668,7 @@ function syncEntities() {
     const iy = lerp(m.py, m.ty, m.snapAt);
     g.position.set(ix, 0, iy);
     g.rotation.y = faceRot(m.cur.dir);
-    animateBody(g, m.cur.anim === "walk", false, 0, ix * 7);
+    animateRig(g, m.cur.anim, false, 0, ix * 7 + iy * 3);
     // bats fly and flap
     const wl = g.getObjectByName("wingL");
     const wr = g.getObjectByName("wingR");
@@ -487,7 +710,7 @@ function syncEntities() {
     g.position.set(ix, 0, iy);
     if (p.cur.anim === "spin") g.rotation.y = t * 16;
     else g.rotation.y = faceRot(p.cur.dir);
-    animateBody(g, p.cur.anim === "walk", !!p.cur.dead, 0, 3);
+    animateRig(g, p.cur.anim, !!p.cur.dead, 0, 3);
   }
   for (const [id, g] of playerModels) {
     if (!G.players.has(id)) {
@@ -504,7 +727,7 @@ function syncEntities() {
   selfModel.position.set(G.x, 0, G.y);
   if (G.anim === "spin") selfModel.rotation.y = t * 16;
   else selfModel.rotation.y = faceRot(G.dir);
-  animateBody(selfModel, G.anim === "walk", G.dead, G.castAnimT, 0);
+  animateRig(selfModel, G.anim, G.dead, G.castAnimT, 0);
 
   // projectiles
   for (const [id, pr] of G.projs) {
@@ -701,6 +924,16 @@ function createFx(f: FX): THREE.Object3D | null {
       s.position.y = 0.3;
       return s;
     }
+    case "dust": {
+      const s = glowSprite("rgba(150,135,110,0.45)", "rgba(110,100,80,0.22)", 0.3);
+      s.position.y = 0.12;
+      return s;
+    }
+    case "heal": {
+      const s = glowSprite("rgba(140,255,140,0.9)", "rgba(40,180,40,0.4)", 0.7);
+      s.position.y = 0.4;
+      return s;
+    }
     default: return null; // swing is drawn on the overlay
   }
 }
@@ -750,6 +983,16 @@ function updateFx(f: FX, obj: THREE.Object3D, age: number) {
     const s = obj as THREE.Sprite;
     s.scale.setScalar(0.4 + age * 0.7);
     s.material.opacity = 0.8 * (1 - age);
+  } else if (f.type === "dust") {
+    const s = obj as THREE.Sprite;
+    s.scale.setScalar(0.18 + age * 0.4);
+    s.position.y = 0.12 + age * 0.16;
+    s.material.opacity = 0.5 * (1 - age);
+  } else if (f.type === "heal") {
+    const s = obj as THREE.Sprite;
+    s.position.y = 0.4 + age * 0.6;
+    s.scale.setScalar(0.7 - age * 0.3);
+    s.material.opacity = 0.9 * (1 - age);
   }
 }
 
@@ -980,6 +1223,11 @@ export function render() {
   syncEntities();
   syncFx();
   fadeOccluders(dt);
+  updateParticles(dt);
+  if (waterMesh) {
+    waterMesh.position.y = Math.sin(G.now * 1.3) * 0.018;
+    if (waterIsLava) (waterMesh.material as THREE.MeshLambertMaterial).emissiveIntensity = 0.9 + Math.sin(G.now * 2.4) * 0.25;
+  }
 
   // sun follows the player so the shadow window stays centered
   sun.position.set(G.x, 0, G.y).addScaledVector(SUN_DIR, 28);

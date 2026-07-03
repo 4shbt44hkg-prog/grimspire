@@ -284,6 +284,8 @@ export const G = {
   sentinels: new Map<string, SentinelState>(),
   usedObjects: new Set<string>(),
   spinUntil: 0,
+  chillUntil: 0,
+  dustT: 0,
   fx: [] as FX[],
   dmgNums: [] as DmgNum[],
   buffs: [] as Buff[],
@@ -521,6 +523,10 @@ export function handleEvents(evs: Ev[]) {
         if (G.dead) break;
         G.life -= e.amt as number;
         G.shake = Math.min(0.35, 0.1 + (e.amt as number) / 120);
+        if (e.chill) {
+          G.chillUntil = Math.max(G.chillUntil, G.now + (e.chill as number));
+          G.toast("Chilled!", "#7ad8ff");
+        }
         SFX.hurt();
         if (G.life <= 0) {
           G.life = 0;
@@ -535,6 +541,8 @@ export function handleEvents(evs: Ev[]) {
         else if (e.fx === "meteor") { G.fx.push({ type: "meteorwarn", x: e.x as number, y: e.y as number, t: G.now, dur: (e.delay as number) || 0.9, r: e.r as number }); }
         else if (e.fx === "slam") { G.fx.push({ type: "boom", x: e.x as number, y: e.y as number, t: G.now, dur: 0.4, r: e.r as number }); SFX.boom(); }
         else if (e.fx === "summon") { G.fx.push({ type: "dropflash", x: e.x as number, y: e.y as number, t: G.now, dur: 0.5 }); }
+        else if (e.fx === "heal") { G.fx.push({ type: "heal", x: e.x as number, y: e.y as number, t: G.now, dur: 0.6 }); }
+        else if (e.fx === "split") { G.fx.push({ type: "boom", x: e.x as number, y: e.y as number, t: G.now, dur: 0.4, r: 0.8, ele: "pois" }); }
         else if (e.fx === "leech") { /* subtle heal */ G.life = Math.min(G.derived?.maxLife ?? G.life, G.life + (e.amt as number)); }
         break;
       }
@@ -701,7 +709,7 @@ export function update(dt: number) {
       G.moveTarget = null;
       G.anim = "idle";
     } else {
-      const sp = d.moveSpeed;
+      const sp = d.moveSpeed * (G.chillUntil > G.now ? 0.55 : 1);
       const [nx, ny] = moveWithCollision(G.map, G.x, G.y, (dx / dist) * sp * dt, (dy / dist) * sp * dt);
       if (Math.abs(nx - G.x) < 0.001 && Math.abs(ny - G.y) < 0.001) {
         G.moveTarget = null; // stuck on wall
@@ -739,6 +747,15 @@ export function update(dt: number) {
   for (const g of G.groundItems.values()) {
     if (g.item.base === "gold" && Math.hypot(g.x - G.x, g.y - G.y) < 1.1) {
       G.send({ t: "pickup", gid: g.gid });
+    }
+  }
+
+  // dust kicked up while running
+  if (G.anim === "walk" && !G.dead) {
+    G.dustT -= dt;
+    if (G.dustT <= 0) {
+      G.dustT = 0.22;
+      G.fx.push({ type: "dust", x: G.x + (Math.random() - 0.5) * 0.3, y: G.y + (Math.random() - 0.5) * 0.3, t: G.now, dur: 0.55 });
     }
   }
 
