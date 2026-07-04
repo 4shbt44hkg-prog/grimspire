@@ -140,10 +140,36 @@ async function startGame(roomCode: string) {
 // ================= INPUT =================
 let mouseX = 0, mouseY = 0;
 let leftHeld = false;
-let standAttack = false; // shift held: attack in place, never move
+let attackHeld = false; // holding LMB on open ground / with shift: keep attacking
+const moveKeys = new Set<string>(); // w a s d
 
 function basicSkill(): string {
   return G.char!.cls === "pyromancer" ? "basic_bolt" : "basic";
+}
+
+// WASD is screen-relative; map through the isometric camera like the
+// touch joystick does (screen-up ≈ world -x/-z along the camera diagonal).
+function wasdWorldDir(): [number, number] | null {
+  let dx = 0, dy = 0;
+  if (moveKeys.has("a")) dx -= 1;
+  if (moveKeys.has("d")) dx += 1;
+  if (moveKeys.has("w")) dy -= 1;
+  if (moveKeys.has("s")) dy += 1;
+  if (!dx && !dy) return null;
+  const inv = Math.SQRT1_2;
+  const wx = (dx + dy) * inv;
+  const wy = (dy - dx) * inv;
+  const len = Math.hypot(wx, wy) || 1;
+  return [wx / len, wy / len];
+}
+
+function applyWasd() {
+  const dir = wasdWorldDir();
+  if (!dir || G.dead) return;
+  G.moveTarget = { x: G.x + dir[0] * 2, y: G.y + dir[1] * 2 };
+  G.pendingPickup = null;
+  G.pendingObj = null;
+  pendingAttack = null;
 }
 
 function worldMouse(): [number, number] {
@@ -209,29 +235,19 @@ canvas.addEventListener("mousedown", (e) => {
         return;
       }
     }
-    // shift: stand your ground and attack toward the cursor
-    if (e.shiftKey) {
-      leftHeld = true;
-      standAttack = true;
-      const [wx, wy] = worldMouse();
-      const mid = monsterUnderMouse();
-      const m = mid ? G.monsters.get(mid) : null;
-      G.moveTarget = null;
-      tryCast(basicSkill(), m ? m.tx : wx, m ? m.ty : wy, mid ?? undefined);
-      return;
-    }
-    // monster?
+    // monster? (chases into range unless shift is held)
     const mid = monsterUnderMouse();
-    if (mid) {
+    if (mid && !e.shiftKey) {
       attackMonster(mid);
       return;
     }
-    // ground move
+    // open ground (or shift): swing/fire toward the cursor — WASD moves you
     leftHeld = true;
+    attackHeld = true;
     const [wx, wy] = worldMouse();
-    G.moveTarget = { x: wx, y: wy };
-    G.pendingPickup = null;
-    G.pendingObj = null;
+    const m = mid ? G.monsters.get(mid) : null;
+    if (!wasdWorldDir()) G.moveTarget = null;
+    tryCast(basicSkill(), m ? m.tx : wx, m ? m.ty : wy, mid ?? undefined);
   } else if (e.button === 2) {
     const [wx, wy] = worldMouse();
     const mid = monsterUnderMouse();
@@ -261,7 +277,7 @@ let pendingAttack: string | null = null;
 canvas.addEventListener("mouseup", (e) => {
   if (e.button === 0) {
     leftHeld = false;
-    standAttack = false;
+    attackHeld = false;
   }
 });
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -293,14 +309,18 @@ window.addEventListener("keydown", (e) => {
     closeAllPanels();
     return;
   }
+  if (["w", "a", "s", "d"].includes(k)) {
+    moveKeys.add(k);
+    return;
+  }
   if (k === "i") togglePanel("inv");
-  else if (k === "s") togglePanel("skills");
+  else if (k === "k") togglePanel("skills");
   else if (k === "c") togglePanel("char");
   else if (k === "b") togglePanel("cube");
   else if (k === "m") { /* minimap always on */ }
   else if (k >= "1" && k <= "4") drinkBelt(Number(k) - 1);
-  else if (["q", "w", "e", "r"].includes(k)) {
-    const idx = ["q", "w", "e", "r"].indexOf(k);
+  else if (["q", "e", "r", "f"].includes(k)) {
+    const idx = ["q", "e", "r", "f"].indexOf(k);
     setSelIdx(idx);
     refreshHUD();
     const [wx, wy] = worldMouse();
@@ -311,6 +331,14 @@ window.addEventListener("keydown", (e) => {
     townPortal();
   }
 });
+
+window.addEventListener("keyup", (e) => {
+  const k = e.key.toLowerCase();
+  if (moveKeys.delete(k) && !wasdWorldDir()) {
+    G.moveTarget = null; // released the last movement key: stop
+  }
+});
+window.addEventListener("blur", () => moveKeys.clear());
 
 document.addEventListener("waypoint-travel", ((e: CustomEvent) => {
   const d = e.detail as number;
@@ -329,18 +357,14 @@ function loop(t: number) {
   lastT = t;
   if (!running || !G.char) return;
 
-  // held-mouse: continuous movement, or continuous stand-attack with shift
-  if (leftHeld && !anyPanelOpen()) {
-    if (standAttack) {
-      G.moveTarget = null;
-      const [wx, wy] = worldMouse();
-      const mid = monsterUnderMouse();
-      const m = mid ? G.monsters.get(mid) : null;
-      tryCast(basicSkill(), m ? m.tx : wx, m ? m.ty : wy, mid ?? undefined);
-    } else {
-      const [wx, wy] = worldMouse();
-      G.moveTarget = { x: wx, y: wy };
-    }
+  // WASD movement (screen-relative, camera-mapped)
+  applyWasd();
+  // held LMB: keep attacking toward the cursor
+  if (leftHeld && attackHeld && !anyPanelOpen()) {
+    const [wx, wy] = worldMouse();
+    const mid = monsterUnderMouse();
+    const m = mid ? G.monsters.get(mid) : null;
+    tryCast(basicSkill(), m ? m.tx : wx, m ? m.ty : wy, mid ?? undefined);
   }
   // pending melee attack chase
   if (pendingAttack) {
@@ -373,10 +397,7 @@ function loop(t: number) {
 // character isn't helpless if a player tabs out mid-fight.
 setInterval(() => {
   if (!running || !G.char || !document.hidden) return;
-  if (leftHeld && !anyPanelOpen()) {
-    const [wx, wy] = worldMouse();
-    G.moveTarget = { x: wx, y: wy };
-  }
+  applyWasd();
   update(1 / 30);
 }, 1000 / 30);
 
@@ -392,6 +413,7 @@ requestAnimationFrame(loop);
 (window as unknown as { tick: (dt: number) => void }).tick = (dt: number) => {
   if (running && G.char) {
     touchTick();
+    applyWasd();
     if (pendingAttack) {
       const m = G.monsters.get(pendingAttack);
       if (!m) pendingAttack = null;

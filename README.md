@@ -85,13 +85,14 @@ start a New Game, and share the 4-letter code shown at the top of the screen.
 
 | Input | Action |
 |---|---|
-| Left click | Move / attack / pick up / interact |
-| Shift + left click (hold) | Stand your ground and attack in place |
+| W A S D | Run (screen-relative) |
+| Left click (hold) | Basic attack toward the cursor / at the clicked monster |
 | Right click | Cast selected skill |
-| Q W E R | Cast skill 1–4 (also selects it) |
+| Q E R F | Cast skill 1–4 (also selects it for right-click) |
+| Left click on loot / chests / NPCs | Pick up / interact |
 | Mouse wheel | Zoom the camera |
 | 1 2 3 4 | Drink belt potion |
-| I / S / C / B | Inventory / Skills / Character / Umbral Cube |
+| I / K / C / B | Inventory / Skills / Character / Umbral Cube |
 | T | Town Portal (innate ability — to town and back) |
 | Enter | Chat |
 | Right-click an item | Equip it / send potion to belt (sells it while the merchant is open) |

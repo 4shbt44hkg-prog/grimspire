@@ -923,7 +923,7 @@ export function refreshHUD() {
   // skill bar
   const bar = $("skillrow");
   bar.innerHTML = "";
-  const keys = ["Q", "W", "E", "R"];
+  const keys = ["Q", "E", "R", "F"];
   for (let i = 0; i < 4; i++) {
     const slot = document.createElement("div");
     slot.className = "skillslot" + (i === selIdx ? " sel" : "");
