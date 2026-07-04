@@ -192,12 +192,19 @@ function objectUnderMouse(): string | null {
   return null;
 }
 
+function lootUnderMouse(): boolean {
+  for (const r of G.labelRects) {
+    if (mouseX >= r.x && mouseX <= r.x + r.w && mouseY >= r.y && mouseY <= r.y + r.h) return true;
+  }
+  return false;
+}
+
 canvas.addEventListener("mousemove", (e) => {
   mouseX = e.clientX;
   mouseY = e.clientY;
   G.hoverMonster = monsterUnderMouse();
   G.hoverObj = G.hoverMonster ? null : objectUnderMouse();
-  canvas.style.cursor = G.hoverMonster || G.hoverObj ? "pointer" : "crosshair";
+  canvas.style.cursor = G.hoverMonster || G.hoverObj || lootUnderMouse() ? "pointer" : "crosshair";
 });
 
 canvas.addEventListener("mousedown", (e) => {

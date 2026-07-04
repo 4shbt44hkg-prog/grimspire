@@ -286,6 +286,7 @@ export const G = {
   spinUntil: 0,
   chillUntil: 0,
   dustT: 0,
+  autoPicked: new Set<string>(),
   fx: [] as FX[],
   dmgNums: [] as DmgNum[],
   buffs: [] as Buff[],
@@ -346,6 +347,7 @@ export function setDepth(d: number, spawnAt?: "up" | "down") {
   G.projs.clear();
   G.groundItems.clear();
   G.usedObjects.clear();
+  G.autoPicked.clear();
   if (G.char && d > G.char.maxDepth) { G.char.maxDepth = d; saveChar(G.char); }
   document.getElementById("zonename")!.textContent = MAX_DEPTH_NAME(d) + (G.roomCode ? `   ·   game ${G.roomCode}` : "");
   sendPos(true);
@@ -743,9 +745,17 @@ export function update(dt: number) {
     }
   }
 
-  // auto-pickup gold & nearby potions? gold only
-  for (const g of G.groundItems.values()) {
-    if (g.item.base === "gold" && Math.hypot(g.x - G.x, g.y - G.y) < 1.1) {
+  // auto-pickup gold, potions and crafting materials (only if they'll fit,
+  // so nothing bounces back to the ground in a loop)
+  if (!G.dead) {
+    for (const g of G.groundItems.values()) {
+      if (G.autoPicked.has(g.gid)) continue;
+      if (Math.hypot(g.x - G.x, g.y - G.y) > 1.6) continue;
+      const b = BASES[g.item.base];
+      const auto = g.item.base === "gold" || b.kind === "mat" || b.kind === "potion" || b.kind === "gem" || b.kind === "rune";
+      if (!auto) continue;
+      if (g.item.base !== "gold" && !canFit(g.item)) continue;
+      G.autoPicked.add(g.gid);
       G.send({ t: "pickup", gid: g.gid });
     }
   }
@@ -816,6 +826,21 @@ export function interactObject(objId: string) {
       if (!G.usedObjects.has(objId)) G.send({ t: "interact", objId });
       break;
   }
+}
+
+// Can this item go somewhere (belt for potions, else inventory)?
+function canFit(item: Item): boolean {
+  const c = G.char;
+  if (!c) return false;
+  const b = BASES[item.base];
+  if (b.kind === "potion") {
+    for (let i = 0; i < 4; i++) {
+      const s = c.belt[i];
+      if (!s) return true;
+      if (s.base === item.base && (s.qty ?? 1) + (item.qty ?? 1) <= (b.stack ?? 10)) return true;
+    }
+  }
+  return findSpot(c.inv, item, INV_W, INV_H) !== null;
 }
 
 // ---------------- Pickup result ----------------

@@ -12,7 +12,7 @@ import { touchRefresh } from "./touch";
 import { SFX } from "./sound";
 import { copySkillIcon, getSprite } from "./sprites";
 
-const CELL = IS_TOUCH ? 25 : 28;
+const CELL = IS_TOUCH ? 26 : 36;
 const $ = (id: string) => document.getElementById(id)!;
 
 const openPanels = new Set<string>();
@@ -441,34 +441,49 @@ function afterChange() {
 }
 
 // ---------------- inventory panel ----------------
-const EQ_SLOTS: { key: string; label: string; col: number; row: number }[] = [
-  { key: "helm", label: "helm", col: 2, row: 0 },
-  { key: "amulet", label: "amul", col: 3, row: 0 },
-  { key: "weapon", label: "weap", col: 1, row: 1 },
-  { key: "body", label: "body", col: 2, row: 1 },
-  { key: "offhand", label: "shld", col: 3, row: 1 },
-  { key: "ring1", label: "ring", col: 1, row: 2 },
-  { key: "belt", label: "belt", col: 2, row: 2 },
-  { key: "ring2", label: "ring", col: 3, row: 2 },
-  { key: "gloves", label: "glov", col: 1, row: 3 },
-  { key: "boots", label: "boot", col: 2, row: 3 },
+// Equipment as a paper doll: the slots sit where they'd sit on a body.
+const EQ_SLOTS: { key: string; label: string; x: number; y: number; s: number }[] = [
+  { key: "helm", label: "helm", x: 111, y: 2, s: 58 },
+  { key: "amulet", label: "amulet", x: 182, y: 14, s: 44 },
+  { key: "weapon", label: "weapon", x: 14, y: 66, s: 58 },
+  { key: "body", label: "chest", x: 111, y: 70, s: 58 },
+  { key: "offhand", label: "shield", x: 208, y: 66, s: 58 },
+  { key: "gloves", label: "gloves", x: 14, y: 138, s: 58 },
+  { key: "ring1", label: "ring", x: 73, y: 150, s: 37 },
+  { key: "belt", label: "belt", x: 111, y: 140, s: 58 },
+  { key: "ring2", label: "ring", x: 170, y: 150, s: 37 },
+  { key: "boots", label: "boots", x: 111, y: 208, s: 58 },
 ];
+
+const DOLL_SVG = `<svg viewBox="0 0 280 276" xmlns="http://www.w3.org/2000/svg">
+  <g stroke="#8a7350" stroke-opacity="0.22" fill="none" stroke-linecap="round">
+    <circle cx="140" cy="30" r="17" fill="#8a7350" fill-opacity="0.14" stroke="none"/>
+    <line x1="140" y1="50" x2="140" y2="160" stroke-width="34"/>
+    <line x1="122" y1="66" x2="52" y2="112" stroke-width="16"/>
+    <line x1="158" y1="66" x2="228" y2="112" stroke-width="16"/>
+    <line x1="130" y1="165" x2="126" y2="252" stroke-width="15"/>
+    <line x1="150" y1="165" x2="154" y2="252" stroke-width="15"/>
+  </g>
+</svg>`;
 
 function rebuildInv() {
   const c = G.char!;
   const p = $("panel-inv");
   p.innerHTML = `<span class="closex" data-close="inv">✕</span><h3>Inventory</h3>`;
-  const eq = document.createElement("div");
-  eq.className = "equipgrid";
-  eq.style.gridTemplateRows = "repeat(4, 56px)";
+  const doll = document.createElement("div");
+  doll.className = "paperdoll";
+  doll.innerHTML = DOLL_SVG;
   for (const s of EQ_SLOTS) {
     const slot = document.createElement("div");
     slot.className = "eqslot";
-    slot.style.gridColumn = String(s.col + 1);
-    slot.style.gridRow = String(s.row + 1);
+    slot.style.left = `${s.x}px`;
+    slot.style.top = `${s.y}px`;
+    slot.style.width = `${s.s}px`;
+    slot.style.height = `${s.s}px`;
     const it = c.equip[s.key];
     if (it) {
-      slot.appendChild(itemIcon(it, 54, 54));
+      slot.appendChild(itemIcon(it, s.s - 4, s.s - 4));
+      slot.classList.add("filled");
       slot.addEventListener("mouseenter", (e) => { if (!G.heldItem) showItemTooltip(it, e.clientX, e.clientY); });
       slot.addEventListener("mouseleave", hideTooltip);
       attachLongPressTooltip(slot, () => c.equip[s.key]);
@@ -484,9 +499,9 @@ function rebuildInv() {
       clickEquipSlot(s.key, e.button);
     });
     slot.addEventListener("contextmenu", (e) => e.preventDefault());
-    eq.appendChild(slot);
+    doll.appendChild(slot);
   }
-  p.appendChild(eq);
+  p.appendChild(doll);
   const goldRow = document.createElement("div");
   goldRow.style.cssText = "text-align:center;color:#e8c860;font-size:13px;margin-bottom:6px";
   goldRow.textContent = `Gold: ${c.gold.toLocaleString()}`;

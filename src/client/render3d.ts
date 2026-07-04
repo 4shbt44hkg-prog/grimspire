@@ -1065,22 +1065,29 @@ function drawOverlay() {
     }
   }
 
-  // ---- ground item labels ----
+  // ---- ground item labels (big, forgiving click targets) ----
   for (const g of G.groundItems.values()) {
     const [sx, sy] = w2s(g.x, g.y);
     if (sx < -80 || sx > W + 80 || sy < -60 || sy > H + 60) continue;
     const color = g.item.base === "gold" ? "#e8c860" : RARITY_COLOR[g.item.rarity];
     const label = g.item.base === "gold" ? `${g.item.qty} gold` : g.item.name + ((g.item.qty ?? 1) > 1 ? ` (${g.item.qty})` : "");
-    octx.font = "12px Georgia";
+    octx.font = "13px Georgia";
     const tw = octx.measureText(label).width;
-    const lx = sx - tw / 2 - 4;
-    const ly = sy - 0.55 * pxuY - 24;
+    const lx = sx - tw / 2 - 6;
+    const ly = sy - 0.55 * pxuY - 28;
     octx.fillStyle = "rgba(0,0,0,0.72)";
-    octx.fillRect(lx, ly, tw + 8, 16);
+    octx.fillRect(lx, ly, tw + 12, 19);
     octx.fillStyle = color;
     octx.textAlign = "left";
-    octx.fillText(label, lx + 4, ly + 12);
-    G.labelRects.push({ gid: g.gid, x: lx, y: ly, w: tw + 8, h: 16 });
+    octx.fillText(label, lx + 6, ly + 14);
+    // one generous rect from the label down over the 3D marker itself
+    G.labelRects.push({
+      gid: g.gid,
+      x: Math.min(lx, sx - 26),
+      y: ly,
+      w: Math.max(tw + 12, 52),
+      h: (sy + 12) - ly,
+    });
   }
 
   // ---- monsters: rects, hp bars, hover names ----
